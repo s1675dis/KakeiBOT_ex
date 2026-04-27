@@ -5,6 +5,7 @@ Google Spreadsheetの初期セットアップスクリプト
 - 支出記録: 日付 / 時刻 / カテゴリ / 金額 / 通貨
 - 予算設定: 項目 / 金額  (デフォルト1日予算: JPY¥3,000 / USD$30)
 - 収入記録: 年月 / 金額 / 通貨
+- サブスク: 金額 / 通貨 / 備考 / 登録日
 
 使い方:
     python setup_spreadsheet.py
@@ -20,6 +21,7 @@ REQUIRED_SHEETS: dict[str, list[str]] = {
     "支出記録": ["日付", "時刻", "カテゴリ", "金額", "通貨"],
     "予算設定": ["項目", "金額"],
     "収入記録": ["年月", "金額", "通貨"],
+    "サブスク":  ["金額", "通貨", "備考", "登録日"],
 }
 
 
@@ -110,6 +112,19 @@ def setup() -> None:
         ws3.update("A1:C1", [["年月", "金額", "通貨"]])
         ws3.format("A1:C1", {"textFormat": {"bold": True}})
         print("✅ 収入記録のヘッダーを設定しました (年月/金額/通貨)")
+
+    # --- サブスクシート ---
+    if "サブスク" not in existing_sheets:
+        ws4 = spreadsheet.add_worksheet(title="サブスク", rows=100, cols=4)
+        print("✅ シート「サブスク」を作成しました")
+    else:
+        ws4 = spreadsheet.worksheet("サブスク")
+        print("ℹ️  シート「サブスク」は既に存在します")
+
+    if not ws4.row_values(1):
+        ws4.update("A1:D1", [["金額", "通貨", "備考", "登録日"]])
+        ws4.format("A1:D1", {"textFormat": {"bold": True}})
+        print("✅ サブスクのヘッダーを設定しました (金額/通貨/備考/登録日)")
 
     print("\n✅ セットアップ完了！")
 

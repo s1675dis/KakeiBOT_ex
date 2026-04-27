@@ -378,6 +378,9 @@ async def cmd_help(ctx: commands.Context) -> None:
         "!給料日                給料日を表示",
         "!給料日 <日>           給料日を設定       例: !給料日 15",
         "!通貨                  使用可能な通貨を確認",
+        "!サブスク                          サブスク一覧を表示",
+        f"!サブスク <金額> <備考> [通貨]     サブスクを登録     例: !サブスク 980 Spotify",
+        "!サブスク解約 <金額> <備考>        サブスクを解約     例: !サブスク解約 980 Spotify",
         "!報告                    定時報告のON/OFF状態を表示",
         "!報告 今日 on/off        毎日: 今日の支出",
         "!報告 今週毎日 on/off    毎日: 今週の支出",
@@ -449,6 +452,90 @@ async def cmd_report_toggle(ctx: commands.Context, *args: str) -> None:
         await ch.send(f"📢 {desc}の定時報告を **{status}** にしました。")
     else:
         await ch.send(f"❌ 設定に失敗しました。\n```{error_msg}```")
+
+
+@bot.command(name="サブスク")
+async def cmd_subscription(ctx: commands.Context, *args: str) -> None:
+    """サブスクを表示・登録する。
+    !サブスク                        → 一覧表示
+    !サブスク <金額> <備考> [通貨]   → 登録
+    """
+    ch = await _reply_thread(ctx)
+    default_currency = sheets.get_default_currency()
+
+    if not args:
+        subs = sheets.get_all_subscriptions()
+        if not subs:
+            await ch.send(
+                "📱 登録済みのサブスクはありません。\n"
+                "`!サブスク <金額> <備考>` で登録できます。"
+            )
+            return
+        lines = ["📱 **登録済みサブスク**"]
+        totals: dict[str, float] = {}
+        for row in subs:
+            cur = str(row.get("通貨", default_currency)).upper()
+            amt = float(row.get("金額", 0))
+            memo = str(row.get("備考", ""))
+            lines.append(f"　{memo}：{fmt(amt, cur)}")
+            totals[cur] = totals.get(cur, 0.0) + amt
+        lines.append("──────────────")
+        for cur, total in totals.items():
+            lines.append(f"合計：{fmt(total, cur)} / 月")
+        lines.append("\n`!サブスク解約 <金額> <備考>` で解約できます。")
+        await ch.send("\n".join(lines))
+        return
+
+    value = float_or_none(args[0])
+    if value is None or value <= 0:
+        await ch.send("⚠️ 正しい金額を入力してください。例: `!サブスク 980 Spotify`")
+        return
+    if len(args) < 2:
+        await ch.send("⚠️ 備考を入力してください。例: `!サブスク 980 Spotify`")
+        return
+
+    if len(args) >= 3 and args[-1].upper() in Config.SUPPORTED_CURRENCIES:
+        currency = args[-1].upper()
+        memo = " ".join(args[1:-1])
+    else:
+        currency = default_currency
+        memo = " ".join(args[1:])
+
+    success, error_msg = sheets.add_subscription(value, currency, memo)
+    if success:
+        await ch.send(f"✅ **{memo}** ({fmt(value, currency)} / 月) を登録しました。")
+    else:
+        await ch.send(f"❌ 登録に失敗しました。\n```{error_msg}```")
+
+
+@bot.command(name="サブスク解約")
+async def cmd_subscription_cancel(ctx: commands.Context, *args: str) -> None:
+    """サブスクを解約する。
+    !サブスク解約 <金額> <備考> [通貨]
+    """
+    ch = await _reply_thread(ctx)
+
+    if len(args) < 2:
+        await ch.send("⚠️ 使い方: `!サブスク解約 <金額> <備考>`\n例: `!サブスク解約 980 Spotify`")
+        return
+
+    value = float_or_none(args[0])
+    if value is None or value <= 0:
+        await ch.send("⚠️ 正しい金額を入力してください。例: `!サブスク解約 980 Spotify`")
+        return
+
+    if args[-1].upper() in Config.SUPPORTED_CURRENCIES:
+        currency: str | None = args[-1].upper()
+        memo = " ".join(args[1:-1])
+    else:
+        currency = None
+        memo = " ".join(args[1:])
+
+    success = sheets.delete_subscription(value, memo, currency)
+    if success:
+        await ch.send(f"✅ **{memo}** のサブスクを解約しました。")
+    else:
+        await ch.send(f"⚠️ **{memo}** のサブスクが見つかりませんでした。")
 
 
 @bot.command(name="update")

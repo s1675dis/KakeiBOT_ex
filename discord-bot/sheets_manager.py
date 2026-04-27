@@ -13,6 +13,7 @@ from config import Config
 SHEET_EXPENSES = "支出記録"
 SHEET_BUDGET = "予算設定"
 SHEET_INCOME = "収入記録"
+SHEET_SUBSCRIPTIONS = "サブスク"
 
 # 通貨ごとの表示設定
 CURRENCY_SYMBOL = {"JPY": "¥", "USD": "$"}
@@ -100,6 +101,9 @@ class SheetsManager:
 
     def _income_sheet(self) -> gspread.Worksheet:
         return self._spreadsheet.worksheet(SHEET_INCOME)
+
+    def _subscriptions_sheet(self) -> gspread.Worksheet:
+        return self._spreadsheet.worksheet(SHEET_SUBSCRIPTIONS)
 
     # ------------------------------------------------------------------
     # 書き込み
@@ -338,6 +342,70 @@ class SheetsManager:
             return False
 
 
+    # ------------------------------------------------------------------
+    # サブスク管理
+    # 保存形式: 金額 | 通貨 | 備考 | 登録日
+    # ------------------------------------------------------------------
+
+    def get_all_subscriptions(self) -> list[dict]:
+        """登録済みサブスク一覧を返す。"""
+        try:
+            return self._subscriptions_sheet().get_all_records()
+        except Exception as exc:
+            print(f"[SheetsManager] get_all_subscriptions error: {exc}")
+            return []
+
+    def add_subscription(self, amount: float, currency: str, memo: str) -> tuple[bool, str]:
+        """サブスクを登録する。"""
+        currency = currency.upper()
+        if currency not in Config.SUPPORTED_CURRENCIES:
+            currency = Config.DEFAULT_CURRENCY
+        try:
+            now = _now()
+            self._subscriptions_sheet().append_row(
+                [amount, currency, memo, now.strftime("%Y-%m-%d")],
+                value_input_option="USER_ENTERED",
+            )
+            return True, ""
+        except Exception as exc:
+            print(f"[SheetsManager] add_subscription error: {exc}")
+            return False, str(exc)
+
+    def delete_subscription(self, amount: float, memo: str, currency: str | None = None) -> bool:
+        """金額と備考が一致する最初のサブスクを削除する。見つからなければ False。"""
+        try:
+            sheet = self._subscriptions_sheet()
+            records = sheet.get_all_records()
+            for i, row in enumerate(records, start=2):
+                if (float(row.get("金額", 0)) == amount
+                        and str(row.get("備考", "")).strip() == memo
+                        and (currency is None
+                             or str(row.get("通貨", "")).strip().upper() == currency)):
+                    sheet.delete_rows(i)
+                    return True
+        except Exception as exc:
+            print(f"[SheetsManager] delete_subscription error: {exc}")
+        return False
+
+    def _get_subscription_totals(
+        self,
+    ) -> dict[str, tuple[float, list[tuple[str, float]]]]:
+        """サブスク合計を通貨ごとに返す。{currency: (total, [(memo, amount), ...])}"""
+        result: dict[str, tuple[float, list[tuple[str, float]]]] = {}
+        for row in self.get_all_subscriptions():
+            currency = str(row.get("通貨", Config.DEFAULT_CURRENCY)).upper()
+            if currency not in Config.SUPPORTED_CURRENCIES:
+                currency = Config.DEFAULT_CURRENCY
+            amount = float(row.get("金額", 0))
+            memo = str(row.get("備考", "")).strip()
+            if currency not in result:
+                result[currency] = (0.0, [])
+            total, items = result[currency]
+            total += amount
+            items.append((memo, amount))
+            result[currency] = (total, items)
+        return result
+
     def _filter_by_dates(
         self, all_records: list[dict], start_date: str, end_date: str
     ) -> list[dict]:
@@ -553,6 +621,7 @@ class SheetsManager:
             income_records = []
 
         period_ym = start.strftime("%Y-%m")
+        sub_totals = self._get_subscription_totals()
         lines = [
             "📊 **今月の支出**",
             f"期間: {start.strftime('%m/%d')} 〜 {end.strftime('%m/%d')}　({days_elapsed}/{days_total}日経過)",
@@ -562,7 +631,8 @@ class SheetsManager:
         for currency in Config.SUPPORTED_CURRENCIES:
             expense_total, by_cat = agg_month.get(currency, (0.0, {}))
             income = _income_from_records(income_records, currency, period_ym)
-            if expense_total == 0.0 and income == 0.0:
+            sub_total, sub_items = sub_totals.get(currency, (0.0, []))
+            if expense_total == 0.0 and income == 0.0 and sub_total == 0.0:
                 continue
 
             if not first_block:
@@ -572,8 +642,13 @@ class SheetsManager:
                 lines.append(f"収入：{fmt(income, currency)}")
             for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
                 lines.append(f"{cat}：{fmt(amt, currency)}")
+            if sub_items:
+                lines.append("📱 サブスク")
+                for memo, amt in sub_items:
+                    lines.append(f"　{memo}：{fmt(amt, currency)}")
             lines.append("──────────────")
-            lines.append(f"合計：{fmt(expense_total, currency)}")
+            total_with_subs = expense_total + sub_total
+            lines.append(f"合計：{fmt(total_with_subs, currency)}")
             budget_lines = self._build_budget_lines(
                 currency, budgets, "月",
                 agg_day, agg_week, agg_month,
@@ -583,7 +658,7 @@ class SheetsManager:
                 lines.append("")
                 lines.extend(budget_lines)
             if income > 0:
-                remaining = income - expense_total
+                remaining = income - total_with_subs
                 lines.append("")
                 if remaining >= 0:
                     lines.append(f"💰 残り使える額：**{fmt(remaining, currency)}**")
@@ -628,13 +703,15 @@ class SheetsManager:
             print(f"[SheetsManager] get_monthly_report income fetch error: {exc}")
             income_records = []
 
+        sub_totals = self._get_subscription_totals()
         lines = [f"📆 **月次レポート ({start.strftime('%m/%d')} 〜 {end.strftime('%m/%d')})**"]
 
         first_block = True
         for currency in Config.SUPPORTED_CURRENCIES:
             expense_total, by_cat = agg_month.get(currency, (0.0, {}))
             income = _income_from_records(income_records, currency, target_ym)
-            if expense_total == 0.0 and income == 0.0:
+            sub_total, sub_items = sub_totals.get(currency, (0.0, []))
+            if expense_total == 0.0 and income == 0.0 and sub_total == 0.0:
                 continue
 
             if not first_block:
@@ -644,8 +721,13 @@ class SheetsManager:
                 lines.append(f"収入：{fmt(income, currency)}")
             for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
                 lines.append(f"{cat}：{fmt(amt, currency)}")
+            if sub_items:
+                lines.append("📱 サブスク")
+                for memo, amt in sub_items:
+                    lines.append(f"　{memo}：{fmt(amt, currency)}")
             lines.append("──────────────")
-            lines.append(f"合計：{fmt(expense_total, currency)}")
+            total_with_subs = expense_total + sub_total
+            lines.append(f"合計：{fmt(total_with_subs, currency)}")
             budget_lines = self._build_budget_lines(
                 currency, budgets, "月",
                 agg_day, agg_week, agg_month,
@@ -656,7 +738,7 @@ class SheetsManager:
                 lines.extend(budget_lines)
             if income > 0:
                 lines.append("")
-                savings = income - expense_total
+                savings = income - total_with_subs
                 if savings >= 0:
                     lines.append(f"💰 今月の貯金：**{fmt(savings, currency)}**")
                 else:
