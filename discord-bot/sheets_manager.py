@@ -109,21 +109,35 @@ class SheetsManager:
     # 書き込み
     # ------------------------------------------------------------------
 
-    def add_expense(self, amount: float, category: str, currency: str = "JPY") -> bool:
-        """支出を記録する。成功したら True を返す。"""
+    def add_expense(
+        self,
+        amount: float,
+        category: str,
+        currency: str = "JPY",
+        record_date: DateType | None = None,
+    ) -> bool:
+        """支出を記録する。record_date を指定するとその日付で計上する。成功したら True を返す。"""
         currency = currency.upper()
         if currency not in Config.SUPPORTED_CURRENCIES:
             currency = Config.DEFAULT_CURRENCY
         try:
             now = _now()
+            date_str = record_date.strftime("%Y-%m-%d") if record_date else now.strftime("%Y-%m-%d")
             self._expenses_sheet().append_row(
-                [now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), category, amount, currency],
+                [date_str, now.strftime("%H:%M:%S"), category, amount, currency],
                 value_input_option="USER_ENTERED",
             )
             return True
         except Exception as exc:
             print(f"[SheetsManager] add_expense error: {exc}")
             return False
+
+    def get_next_period_start(self) -> DateType:
+        """次の給与期間の初日を返す。"""
+        today = _now().date()
+        payday = self.get_payday()
+        _, current_end = _get_pay_period(payday, today)
+        return current_end + timedelta(days=1)
 
     def set_income(self, amount: float, currency: str, year_month: str | None = None) -> tuple[bool, str]:
         """指定年月の収入を記録する（既存行があれば上書き）。

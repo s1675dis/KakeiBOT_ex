@@ -120,6 +120,12 @@ async def on_message(message: discord.Message) -> None:
             await message.channel.send(f"⚠️ 収入の登録に失敗しました。\n```{error_msg}```")
         return
 
+    # 末尾の「来月」フラグを検出・除去 (支出入力のみ対象)
+    is_next_month = False
+    if content.endswith("来月"):
+        is_next_month = True
+        content = content[:-2].strip()
+
     match = EXPENSE_PATTERN.match(content)
     if match:
         amount = float(match.group(1))
@@ -146,9 +152,15 @@ async def on_message(message: discord.Message) -> None:
                 delete_after=10,
             )
     else:
-        success = sheets.add_expense(amount, category, currency)
+        record_date = sheets.get_next_period_start() if is_next_month else None
+        success = sheets.add_expense(amount, category, currency, record_date)
         if success:
             await message.add_reaction("✅")
+            if is_next_month:
+                await message.channel.send(
+                    f"📅 来月分 ({record_date.strftime('%m/%d')} 〜) として計上しました。",
+                    delete_after=15,
+                )
         else:
             await message.add_reaction("❌")
             await message.channel.send("⚠️ スプレッドシートへの記録に失敗しました。")
@@ -357,8 +369,9 @@ async def cmd_help(ctx: commands.Context) -> None:
         "",
         "**📥 支出入力** (支出チャンネルのみ)",
         "```",
-        f"<金額> <カテゴリ> [通貨]   例: 10.26 食費 {cur}",
-        f"<金額> [通貨]              例: 5.00 {cur}  (カテゴリ省略 → 食費)",
+        f"<金額> <カテゴリ> [通貨]        例: 10.26 食費 {cur}",
+        f"<金額> [通貨]                   例: 5.00 {cur}  (カテゴリ省略 → 食費)",
+        f"<金額> <カテゴリ> [通貨] 来月   例: 560 家賃 来月  (来月期間の初日に計上)",
         "```",
         "**📊 レポート**",
         "```",
