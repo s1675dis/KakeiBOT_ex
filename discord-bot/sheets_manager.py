@@ -654,6 +654,7 @@ class SheetsManager:
             first_block = False
             if income > 0:
                 lines.append(f"収入：{fmt(income, currency)}")
+                lines.append("──────────────")
             for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
                 lines.append(f"{cat}：{fmt(amt, currency)}")
             if sub_items:
@@ -733,6 +734,7 @@ class SheetsManager:
             first_block = False
             if income > 0:
                 lines.append(f"収入：{fmt(income, currency)}")
+                lines.append("──────────────")
             for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1]):
                 lines.append(f"{cat}：{fmt(amt, currency)}")
             if sub_items:
