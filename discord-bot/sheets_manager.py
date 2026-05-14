@@ -676,7 +676,7 @@ class SheetsManager:
                 remaining = income - total_with_subs
                 lines.append("")
                 if remaining >= 0:
-                    lines.append(f"💰 残り使える額：**{fmt(remaining, currency)}**")
+                    lines.append(f"💰 残金：**{fmt(remaining, currency)}**")
                 else:
                     lines.append(f"⚠️ 収入オーバー：**{fmt(abs(remaining), currency)}**")
 
