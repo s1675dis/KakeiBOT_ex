@@ -138,11 +138,13 @@ class SheetsManager:
             return False
         try:
             recorded_time = _now().strftime("%H:%M:%S")
+            # 日付・時刻はSheetsに解釈させ、カテゴリだけは文字列として保持する。
+            # カテゴリが数式や数値に見えても、先頭の引用符で自動変換を防ぐ。
             rows = [
-                [day.isoformat(), recorded_time, category, amount, currency]
+                [day.isoformat(), recorded_time, "'" + category, amount, currency]
                 for day, amount, category, currency in entries
             ]
-            self._expenses_sheet().append_rows(rows, value_input_option="RAW")
+            self._expenses_sheet().append_rows(rows, value_input_option="USER_ENTERED")
             return True
         except Exception as exc:
             print(f"[SheetsManager] add_expenses error: {exc}")

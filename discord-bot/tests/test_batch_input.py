@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -57,15 +57,30 @@ class SheetsBatchTests(unittest.TestCase):
 
     def test_single_append_keeps_dates_numbers_and_literal_category(self):
         entries = parse_batch_expenses('!入力 260917-260918\n1.2\n3.1\n\n7.45 =1+1', 'USD')
-        self.assertTrue(self.manager.add_expenses(entries))
+        with patch('sheets_manager._now', return_value=datetime(2026, 9, 22, 12, 34, 56)):
+            self.assertTrue(self.manager.add_expenses(entries))
         self.sheet.append_rows.assert_called_once()
         rows = self.sheet.append_rows.call_args.args[0]
+        self.assertEqual([r[1] for r in rows], ['12:34:56'] * 3)
         self.assertEqual([(r[0], r[2], r[3], r[4]) for r in rows], [
-            ('2026-09-17', '食費', 1.2, 'USD'),
-            ('2026-09-17', '食費', 3.1, 'USD'),
-            ('2026-09-18', '=1+1', 7.45, 'USD'),
+            ('2026-09-17', "'食費", 1.2, 'USD'),
+            ('2026-09-17', "'食費", 3.1, 'USD'),
+            ('2026-09-18', "'=1+1", 7.45, 'USD'),
         ])
-        self.assertEqual(self.sheet.append_rows.call_args.kwargs, {'value_input_option': 'RAW'})
+        self.assertEqual(self.sheet.append_rows.call_args.kwargs, {'value_input_option': 'USER_ENTERED'})
+
+    def test_dates_and_times_are_not_escaped_but_categories_are(self):
+        categories = ['123', '2026-09-17', '=1+1', "'カテゴリ", '娯楽']
+        entries = [(date(2026, 9, 17), 1.2, category, 'USD') for category in categories]
+        with patch('sheets_manager._now', return_value=datetime(2026, 9, 22, 0, 0, 0)):
+            self.assertTrue(self.manager.add_expenses(entries))
+        rows = self.sheet.append_rows.call_args.args[0]
+        for row, category in zip(rows, categories):
+            self.assertEqual(row[:2], ['2026-09-17', '00:00:00'])
+            self.assertEqual(row[2], "'" + category)
+            self.assertEqual(row[3:], [1.2, 'USD'])
+        self.assertEqual(self.sheet.append_rows.call_args.kwargs,
+                         {'value_input_option': 'USER_ENTERED'})
 
     def test_failure_and_empty_batch(self):
         self.assertFalse(self.manager.add_expenses([]))
