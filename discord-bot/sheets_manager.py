@@ -132,6 +132,22 @@ class SheetsManager:
             print(f"[SheetsManager] add_expense error: {exc}")
             return False
 
+    def add_expenses(self, entries: list[tuple[DateType, float, str, str]]) -> bool:
+        """検証済みの支出を日付・通貨ごとに一度のAPI呼び出しで追記する。"""
+        if not entries:
+            return False
+        try:
+            recorded_time = _now().strftime("%H:%M:%S")
+            rows = [
+                [day.isoformat(), recorded_time, category, amount, currency]
+                for day, amount, category, currency in entries
+            ]
+            self._expenses_sheet().append_rows(rows, value_input_option="RAW")
+            return True
+        except Exception as exc:
+            print(f"[SheetsManager] add_expenses error: {exc}")
+            return False
+
     def get_next_period_start(self) -> DateType:
         """次の給与期間の初日を返す。"""
         today = _now().date()

@@ -20,6 +20,7 @@ from datetime import timezone, timedelta
 import pytz
 from discord.ext import commands, tasks
 
+from batch_input import parse_batch_expenses
 from config import Config
 from setup_spreadsheet import setup as spreadsheet_setup, validate as spreadsheet_validate
 from sheets_manager import SheetsManager, _get_pay_period, fmt
@@ -107,6 +108,28 @@ async def on_message(message: discord.Message) -> None:
 
     content = message.content.strip()
     default_currency = sheets.get_default_currency()
+
+    # 通常のメッセージとWebhookの両方で一括入力を処理する。
+    if re.match(r"^!入力(?:\s|$)", content):
+        try:
+            entries = parse_batch_expenses(content, default_currency)
+        except ValueError as exc:
+            await message.add_reaction("❌")
+            await message.channel.send(f"⚠️ {exc}\n記録は追加していません。")
+            return
+        success = sheets.add_expenses(entries)
+        if success:
+            await message.add_reaction("✅")
+            await message.channel.send(
+                f"✅ {entries[0][0]:%Y-%m-%d}〜{entries[-1][0]:%Y-%m-%d}の支出を"
+                f"{len(entries)}件記録しました。"
+            )
+        else:
+            await message.add_reaction("❌")
+            await message.channel.send(
+                "⚠️ 一括入力の完了を確認できませんでした。再送する前にスプレッドシートを確認してください。"
+            )
+        return
 
     income_match = INCOME_PATTERN.match(content)
     if income_match:
@@ -368,6 +391,15 @@ async def cmd_help(ctx: commands.Context) -> None:
         "📖 **コマンド一覧**",
         "",
         "**📥 支出入力** (支出チャンネルのみ)",
+        "一括入力: `!入力 YYMMDD-YYMMDD` の次の行から金額 [カテゴリ] [通貨]。",
+        "最初は期間初日、金額行の間に空行を挟むと翌日へ進みます。",
+        "```",
+        "!入力 260917-260921",
+        "1.2",
+        "3.1",
+        "",
+        "7.45 娯楽",
+        "```",
         "```",
         f"<金額> <カテゴリ> [通貨]        例: 10.26 食費 {cur}",
         f"<金額> [通貨]                   例: 5.00 {cur}  (カテゴリ省略 → 食費)",
